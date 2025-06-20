@@ -1,7 +1,14 @@
 from collections import deque
 from random import shuffle
 from tokenizers import Tokenizer
-from torchdata.nodes import IterableWrapper, ParallelMapper, Batcher, Loader
+from torchdata.nodes import (
+    IterableWrapper,
+    ParallelMapper,
+    Batcher,
+    Loader,
+    PinMemory,
+    Prefetcher,
+)
 import random
 import torch
 
@@ -69,6 +76,9 @@ class LazyLoader:
 
         # 3. group into batches
         node = Batcher(node, batch_size=self.batch_size, drop_last=False)
+
+        node = PinMemory(node)
+        node = Prefetcher(node, prefetch_factor=4)
         loader = Loader(node)
         return loader
 
