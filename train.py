@@ -12,7 +12,7 @@ import torch.optim as optim
 
 
 def main():
-    device = "cpu"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input",
@@ -96,6 +96,7 @@ def main():
         num_decoder_layers=3,
         dim_feedforward=512,
     )
+    model = model.to(device)
     if args.reload_model:
         model.load_state_dict(os.path.join(out_dir, args.model_name + ".pt"))
 
