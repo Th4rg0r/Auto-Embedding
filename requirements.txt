@@ -1,0 +1,4 @@
+alive_progress==3.2.0
+tokenizers==0.21.1
+torch==2.7.0+cu128
+torchdata==0.11.0
