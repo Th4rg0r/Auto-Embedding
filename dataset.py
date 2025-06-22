@@ -26,7 +26,7 @@ def get_file_line_cnt(fp):
 def split_train_test_set(
     file_path, out_path, train_ratio=0.8, validation_ratio=0.1, test_ratio=0.1
 ):
-    print ("split into three datasets: train, eval, test")
+    print("split into three datasets: train, eval, test")
     ratio_sum = train_ratio + validation_ratio + test_ratio
     train_ratio = train_ratio / ratio_sum
     validation_ratio = validation_ratio / ratio_sum
@@ -52,11 +52,11 @@ def split_train_test_set(
     valid_cnt = 0
     test_cnt = 0
 
-    with alive_bar(line_count) as bar ,open(file_path, "r") as f_input, open(train_out_fp, "w") as f_train, open(
-        eval_out_fp, "w"
-    ) as f_valid, open(test_out_fp, "w") as f_test:
+    with alive_bar(line_count) as bar, open(file_path, "r") as f_input, open(
+        train_out_fp, "w"
+    ) as f_train, open(eval_out_fp, "w") as f_valid, open(test_out_fp, "w") as f_test:
         valid_threshold = batch_line_cnt * train_ratio
-        test_threshold = batch_line_cnt * (validation_ratio+train_ratio)
+        test_threshold = batch_line_cnt * (validation_ratio + train_ratio)
         for line in f_input:
             cur_idx = idxs[tmp_idx]
             if cur_idx < valid_threshold:
@@ -107,17 +107,20 @@ class ShuffleBuffer:
 
 
 class LazyLoader:
-    def __init__(self, tokenizer, file_path, batch_size):
+    def __init__(self, tokenizer, file_path, batch_size, max_word_per_sentence):
         self.file_path = file_path
-        #self.tokenizer = Tokenizer.from_file(tokenizer_path)
+        # self.tokenizer = Tokenizer.from_file(tokenizer_path)
         self.tokenizer = tokenizer
         self.start_id = self.tokenizer.token_to_id("<s>")
         self.end_id = self.tokenizer.token_to_id("</s>")
         self.batch_size = batch_size
+        self.max_word_per_sentence = max_word_per_sentence
 
     def stream_lines(self, fp):
         with open(fp, "r", encoding="utf-8") as f:
             for line in f:
+                if len(line.split()) > self.max_word_per_sentence:
+                    continue
                 yield line.strip()
 
     def transform_input(self, line):
