@@ -19,10 +19,7 @@ import subprocess
 def get_file_line_cnt(fp):
     # count file lines
     result = subprocess.run(["wc", "-l", fp], capture_output=True, text=True)
-    print("lc")
-    print (result)
     line_count = result.stdout.strip().split()[0]
-    print(line_count)
     return int(line_count)
 
 
