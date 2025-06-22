@@ -1,3 +1,4 @@
+from alive_progress import alive_bar
 from collections import deque
 from random import shuffle
 from tokenizers import Tokenizer
@@ -11,6 +12,77 @@ from torchdata.nodes import (
 )
 import random
 import torch
+import os
+import subprocess
+
+
+def get_file_line_cnt(fp):
+    # count file lines
+    result = subprocess.run(["wc", "-l", fp], capture_output=True, text=True)
+    print("lc")
+    print (result)
+    line_count = result.stdout.strip().split()[0]
+    print(line_count)
+    return int(line_count)
+
+
+def split_train_test_set(
+    file_path, out_path, train_ratio=0.8, validation_ratio=0.1, test_ratio=0.1
+):
+    print ("split into three datasets: train, eval, test")
+    ratio_sum = train_ratio + validation_ratio + test_ratio
+    train_ratio = train_ratio / ratio_sum
+    validation_ratio = validation_ratio / ratio_sum
+    test_ratio = test_ratio / ratio_sum
+
+    batch_line_cnt = 10000
+    line_count = get_file_line_cnt(file_path)
+
+    if line_count < batch_line_cnt:
+        batch_line_cnt = line_count
+
+    dataset_dir = os.path.join(out_path, "datasets")
+    os.makedirs(dataset_dir, exist_ok=True)
+    train_out_fp = os.path.join(out_path, "datasets", "train.txt")
+    eval_out_fp = os.path.join(out_path, "datasets", "eval.txt")
+    test_out_fp = os.path.join(out_path, "datasets", "test.txt")
+
+    idxs = list(range(batch_line_cnt))
+    random.shuffle(idxs)
+    tmp_idx = 0
+    batch_iteration = 0
+    train_cnt = 0
+    valid_cnt = 0
+    test_cnt = 0
+
+    with alive_bar(line_count) as bar ,open(file_path, "r") as f_input, open(train_out_fp, "w") as f_train, open(
+        eval_out_fp, "w"
+    ) as f_valid, open(test_out_fp, "w") as f_test:
+        valid_threshold = batch_line_cnt * train_ratio
+        test_threshold = batch_line_cnt * (validation_ratio+train_ratio)
+        for line in f_input:
+            cur_idx = idxs[tmp_idx]
+            if cur_idx < valid_threshold:
+                f_train.write(line + "\n")
+                train_cnt += 1
+            elif cur_idx < test_threshold:
+                f_valid.write(line + "\n")
+                valid_cnt += 1
+            else:
+                f_test.write(line + "\n")
+                test_cnt += 1
+            tmp_idx += 1
+            bar()
+            if tmp_idx >= batch_line_cnt:
+                tmp_idx = 0
+                batch_iteration += 1
+                if (batch_iteration + 1) * batch_line_cnt > line_count:
+                    batch_line_cnt = line_count - batch_iteration * batch_line_cnt
+                    valid_threshold = batch_line_cnt * train_ratio
+                    test_threshold = batch_line_cnt * validation_ratio
+                    idxs = idxs[:batch_line_cnt]
+                random.shuffle(idxs)
+    return train_cnt, valid_cnt, test_cnt, train_out_fp, eval_out_fp, test_out_fp
 
 
 class ShuffleBuffer:
@@ -38,9 +110,10 @@ class ShuffleBuffer:
 
 
 class LazyLoader:
-    def __init__(self, tokenizer_path, file_path, batch_size):
+    def __init__(self, tokenizer, file_path, batch_size):
         self.file_path = file_path
-        self.tokenizer = Tokenizer.from_file(tokenizer_path)
+        #self.tokenizer = Tokenizer.from_file(tokenizer_path)
+        self.tokenizer = tokenizer
         self.start_id = self.tokenizer.token_to_id("<s>")
         self.end_id = self.tokenizer.token_to_id("</s>")
         self.batch_size = batch_size
