@@ -10,7 +10,8 @@ import os
 import torch.nn as nn
 import torch.optim as optim
 import torch
-
+import warnings
+warnings.filterwarnings("ignore", message="The PyTorch API of nested tensors is in prototype stage.*")
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -59,6 +60,8 @@ def main():
     parser.add_argument(
         "--batch_size", type=int, default=32, help="the batch size of the training"
     )
+    parser.add_argument(
+        "--dataset_fraction_percent", type=float, default=100.0, help="the percent of the datasets to be used. Default 100.0")
     args = parser.parse_args()
 
     out_dir = args.language
@@ -79,7 +82,6 @@ def main():
     train_lcnt = 0
     eval_lcnt = 0
     test_lcnt = 0
-    max_per_epoch = 5;
 
     if args.reload_datasets:
         train_input_fp = os.path.join(
@@ -165,11 +167,12 @@ def main():
 
     model.train()
     print("start training")
+    max_per_epoch = (args.dataset_fraction_percent * int(train_lcnt/args.batch_size) )/ 100
     for epoch in range(num_epochs):
             
         batch_idx = 0
         epoch_loss = 0.0
-        with alive_bar(int(train_lcnt/args.batch_size)) as bar:
+        with alive_bar(max_per_epoch) as bar:
             for batch in train_loader:
                 if batch_idx > max_per_epoch:
                     break;
@@ -197,7 +200,7 @@ def main():
                 clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 epoch_loss += loss.item()
-                print("loss_loss " + str(loss.item()))
+                bar.text("Loss: " + str(loss.item()))
                 bar()
 
         avg_loss = epoch_loss / batch_idx
@@ -206,7 +209,8 @@ def main():
         model.eval()
         epoch_val_loss = 0.0
         batch_idx = 0
-        with alive_bar(int(eval_lcnt, args.batch_size)) as bar, torch.no_grad():
+        max_per_epoch = (args.dataset_fraction_percent * int(eval_lcnt/args.batch_size) )/ 100.0
+        with alive_bar(max_per_epoch) as bar, torch.no_grad():
             for batch in eval_loader:
                 if batch_idx > max_per_epoch:
                     break;
@@ -230,13 +234,9 @@ def main():
                 decoder_target = decoder_target.reshape(-1)
                 loss = criterion(outputs, decoder_target)
                 epoch_val_loss += loss.item()
+                bar.text("Loss: " + str(loss.item()))
                 bar()
 
-        print("search_this")
-        print(eval_lcnt)
-        print(epoch_val_loss)
-        print(args.batch_size)
-        #avg_eval_loss = epoch_val_loss / (eval_lcnt/args.batch_size)
         avg_eval_loss = epoch_val_loss / batch_idx
         print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}, Val Loss: {avg_eval_loss}")
         eval_loss_history.append(avg_eval_loss)
@@ -248,7 +248,8 @@ def main():
     model.eval()
     epoch_test_loss = 0.0
     batch_idx = 0
-    with alive_bar(int(test_lcnt/args.batch_size)) as bar, torch.no_grad():
+    max_per_epoch = (args.dataset_fraction_percent * int(test_lcnt/args.batch_size) )/ 100.0
+    with alive_bar(max_per_epoch) as bar, torch.no_grad():
         for batch in test_loader:
             if batch_idx > max_per_epoch:
                 break;
@@ -272,6 +273,7 @@ def main():
             decoder_target = decoder_target.reshape(-1)
             loss = criterion(outputs, decoder_target)
             epoch_test_loss += loss.item()
+            bar.text("Loss: " + str(loss.item()))
             bar()
     avg_test_loss = epoch_test_loss / batch_idx
     print(f"Test Loss: {avg_test_loss:.4f}")

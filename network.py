@@ -66,6 +66,7 @@ class Seq2SeqTransformer(nn.Module):
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt_seq_len).to(
             src.device
         )
+        tgt_mask = tgt_mask.masked_fill(tgt_mask == float('-inf'), True).masked_fill(tgt_mask == 0, False)
         output = self.transformer(
             src_emb,
             tgt_emb,
