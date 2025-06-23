@@ -21,34 +21,41 @@ warnings.filterwarnings(
     "ignore", message="The PyTorch API of nested tensors is in prototype stage.*"
 )
 
+
 def save_model(model, model_type, model_cfg):
-    fp = os.path.join("models", model_type+"_model")
+    fp = os.path.join("models", model_type + "_model")
     enc_fp = os.path.join("embedding_models", model_type, "model")
     torch.save(model.state_dict(), fp + ".pt")
-    with open(fp+".cfg", "w") as f:
+    with open(fp + ".cfg", "w") as f:
         json.dump(model_cfg, f, indent=4)
+
+    with open(fp + ".loss", "w") as f:
+        f.write("Evaluation Loss: "+eval_loss);
 
     encoder_model = EncoderOnly(
         vocab_size=model_cfg["vocab_size"],
-        d_model=model_cfg["vocab_size"]
+        d_model=model_cfg["vocab_size"],
         nhead=model_cfg["nhead"],
-        num_layers=model_cfg["num_encoder_layers"]
+        num_layers=model_cfg["num_encoder_layers"],
         dim_feedforward=model_cfg["dim_feedforward"],
-        dropout=model_cfg["dropout"]
+        dropout=model_cfg["dropout"],
     )
     torch.save(encoder_model.state_dict(), enc_fp + ".pt")
-    with open(enc_fp+".cfg", "w") as f:
+    with open(enc_fp + ".cfg", "w") as f:
         json.dump(model_cfg, f, indent=4)
 
+
 def load_model_cfg(model_type):
-    fp = os.path.join("models", model_type+"_model.cfg")
+    fp = os.path.join("models", model_type + "_model.cfg")
     model_cfg = None
     with open(fp, "r") as f:
-        model_cfg = json.load(f);
-    return model_cfg;
+        model_cfg = json.load(f)
+    return model_cfg
+
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cpu"
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input",
@@ -63,19 +70,20 @@ def main():
         "--model_nhead",
         type=int,
         default=8,
-        help="the number of heads used in the transformer model. embedding size must be divisible by nhead. More heads give the transformer other viewpoints on the embeddings."
+        help="the number of heads used in the transformer model. embedding size must be divisible by nhead. More heads give the transformer other viewpoints on the embeddings.",
     )
     parser.add_argument(
-        "--model_dim_feedforward", 
-        type=int, 
+        "--model_dim_feedforward",
+        type=int,
         default=2048,
-        help="the feed forward dimension size."
+        help="the feed forward dimension size.",
     )
     parser.add_argument(
         "--model_dropout",
         type=float,
         default=0.1,
-        help="The dropout for the neural network. Helps prevent overfitting"
+        help="The dropout for the neural network. Helps prevent overfitting",
+    )
     parser.add_argument(
         "--model_embedding_size",
         type=int,
@@ -187,8 +195,22 @@ def main():
     )
     args = parser.parse_args()
 
+    model_cfg = {
+        "vocab_size": vocab_size,
+        "d_model": args.model_embedding_size,
+        "nhead": args.model_nhead,
+        "num_encoder_layers": args.model_encoder_layer_count,
+        "num_decoder_layers": args.model_decoder_layer_count,
+        "dim_feedforward": args.model_dim_feedforward,
+        "dropout": args.model_dropout,
+        #"eval_loss": float("inf")
+        "eval_loss": 0.9
+    }
 
-    model_cfg = {"vocab_size":vocab_size,"d_model":args.model_embedding_size, "nhead":args.model_nhead, "num_encoder_layers":args.model_encoder_layer_count, "num_decoder_layers":args.model_decoder_layer_count, "dim_feedforward":args.model_dim_feedforward, "dropout":args.model_dropout}
+    fp = os.path.join("models", "best" + "_model")
+    with open(fp + ".cfg", "w") as f:
+        json.dump(model_cfg, f, indent=4)
+    return;
 
     out_dir = args.language
     input_file = args.input
@@ -271,7 +293,7 @@ def main():
         batch_size=args.batch_size,
         max_word_per_sentence=args.max_word_per_sentence,
     )
-    
+
     if args.reload_latest_model:
         model_cfg = load_model_cfg("latest")
     if args.reload_best_model:
@@ -280,12 +302,12 @@ def main():
     vocab_size = tokenizer.get_vocab_size()
     model = Seq2SeqTransformer(
         vocab_size=model_cfg["vocab_size"],
-        d_model=model_cfg["vocab_size"]
+        d_model=model_cfg["vocab_size"],
         nhead=model_cfg["nhead"],
-        num_encoder_layers=model_cfg["num_encoder_layers"]
+        num_encoder_layers=model_cfg["num_encoder_layers"],
         num_decoder_layers=model_cfg["num_decoder_layers"],
         dim_feedforward=model_cfg["dim_feedforward"],
-        dropout=model_cfg["dropout"]
+        dropout=model_cfg["dropout"],
     )
 
     model = model.to(device)
@@ -435,17 +457,74 @@ def main():
         print(torch.cuda.memory_allocated() / 1024**2, "MB")
         scheduler.step(avg_eval_loss)
         eval_loss_history.append(avg_eval_loss)
+    
+        model_cfg["eval_loss"] = avg_eval_loss
+        save_model(model, "latest", model_cfg)
         if avg_eval_loss < min_eval_loss:
             stopping_patience = 0
-            torch.save(model.state_dict(), best_model_fp)
-    
-    
-    
+            #torch.save(model.state_dict(), best_model_fp)
+            min_eval_loss = avg_eval_loss
+            save_model(model, "best", model_cfg)
+            print("best validation loss, save model to: " + best_model_fp)
+        elif not args.disable_early_stopping:
+            stopping_patience += 1
+            if stopping_patience >= args.early_stopping_patience:
+                print(
+                    f"early stopping, because validation loss did not improve for {args.early_stopping_patience} epochs"
+                )
+                break
+        #torch.save(model.state_dict(), latest_model_fp)
+        
 
+    model.eval()
+    epoch_test_loss = 0.0
+    batch_idx = 0
+    max_per_epoch = int(
+        (args.dataset_fraction_percent * int(test_lcnt / args.batch_size)) / 100.0
+    )
+    with alive_bar(max_per_epoch) as bar, torch.no_grad():
+        test_loader = lazy_train_loader.loader()
+        for batch in test_loader:
+            if batch_idx >= max_per_epoch:
+                break
+            batch_idx += 1
+            batch = lazy_test_loader.collate_fn(batch)
+            src_batch, tgt_batch, src_key_mask, tgt_key_mask = batch
+            src_batch = src_batch.to(device)
+            tgt_batch = tgt_batch.to(device)
+            src_key_mask = src_key_mask.to(device)
+            tgt_key_mask = tgt_key_mask.to(device)
+            # Decoder input is all tokens except the last
+            decoder_input = tgt_batch[:, :-1]
+            # Decoder target is all tokens except the first
+            decoder_target = tgt_batch[:, 1:]
 
-def load_model_cfg(model_type):
+            outputs = model(
+                src_batch, decoder_input, src_key_mask, tgt_key_mask[:, :-1]
+            )
+            # Reshape outputs and target for loss
+            outputs = outputs.reshape(-1, vocab_size)
+            decoder_target = decoder_target.reshape(-1)
+            loss = criterion(outputs, decoder_target)
+            epoch_test_loss += loss.item()
+            bar.text(
+                "Loss: "
+                + str(loss.item())
+                + " Memory: "
+                + str(torch.cuda.memory_allocated() / 1024**2)
+                + "MB"
+                " Free: "
+                + str(
+                    (torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated())
+                    / 1024**2
+                )
+                + "MB"
+            )
+            bar()
+            torch.cuda.empty_cache()
+    avg_test_loss = epoch_test_loss / batch_idx
+    print(f"Test Loss: {avg_test_loss:.4f}")
 
-def load_model_state_dict(model_type):
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -570,8 +649,14 @@ def main():
     )
     args = parser.parse_args()
 
-
-    model_cfg = {"vocab_size":vocab_size,"d_model":args.model_embedding_size, "nhead":8, "num_encoder_layers":args.model_encoder_layer_count, "num_decoder_layers":args.model_decoder_layer_count, "dim_feedforward":2048}
+    model_cfg = {
+        "vocab_size": vocab_size,
+        "d_model": args.model_embedding_size,
+        "nhead": 8,
+        "num_encoder_layers": args.model_encoder_layer_count,
+        "num_decoder_layers": args.model_decoder_layer_count,
+        "dim_feedforward": 2048,
+    }
 
     out_dir = args.language
     input_file = args.input
@@ -654,14 +739,13 @@ def main():
         batch_size=args.batch_size,
         max_word_per_sentence=args.max_word_per_sentence,
     )
-    
 
     vocab_size = tokenizer.get_vocab_size()
     model = Seq2SeqTransformer(
         vocab_size=model_cfg["vocab_size"],
-        d_model=model_cfg["vocab_size"]
+        d_model=model_cfg["vocab_size"],
         nhead=model_cfg["nhead"],
-        num_encoder_layers=model_cfg["num_encoder_layers"]
+        num_encoder_layers=model_cfg["num_encoder_layers"],
         num_decoder_layers=model_cfg["num_decoder_layers"],
         dim_feedforward=model_cfg["dim_feedforward"],
     )
@@ -690,7 +774,7 @@ def main():
     num_epochs = args.epochs
     loss_history = []
     eval_loss_history = []
-    min_eval_loss = float("inf")
+    min_eval_loss = model_cfg["eval_loss"]
 
     model.train()
     print("start training")
@@ -813,10 +897,14 @@ def main():
         print(torch.cuda.memory_allocated() / 1024**2, "MB")
         scheduler.step(avg_eval_loss)
         eval_loss_history.append(avg_eval_loss)
+    
+        model_cfg["eval_loss"] = avg_eval_loss
+        save_model(model, "latest", model_cfg)
         if avg_eval_loss < min_eval_loss:
             stopping_patience = 0
-            torch.save(model.state_dict(), best_model_fp)
+            #torch.save(model.state_dict(), best_model_fp)
             min_eval_loss = avg_eval_loss
+            save_model(model, "best", model_cfg)
             print("best validation loss, save model to: " + best_model_fp)
         elif not args.disable_early_stopping:
             stopping_patience += 1
@@ -825,8 +913,8 @@ def main():
                     f"early stopping, because validation loss did not improve for {args.early_stopping_patience} epochs"
                 )
                 break
-
-        torch.save(model.state_dict(), latest_model_fp)
+        #torch.save(model.state_dict(), latest_model_fp)
+        
 
     model.eval()
     epoch_test_loss = 0.0
