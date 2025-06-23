@@ -46,7 +46,8 @@ class EncoderOnly(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model, nhead, dim_feedforward, dropout, batch_first=True
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+        norm = nn.LayerNorm(d_model)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers, norm=norm)
 
     def forward(self, src_ids, src_key_padding_mask=None):
         x = self.embedding(src_ids) * math.sqrt(self.embedding.embedding_dim)

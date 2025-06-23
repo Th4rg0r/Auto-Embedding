@@ -21,10 +21,52 @@ warnings.filterwarnings(
     "ignore", message="The PyTorch API of nested tensors is in prototype stage.*"
 )
 
+def save_model_to_embedding(out_dir, model_type):
+    tokenizer_path = os.path.join(out_dir, "tokenizer.json")
+    tokenizer_embedding_path = os.path.join(out_dir, "embedding_models", model_type, "tokenizer.json")
+    tokenizer = Tokenizer.from_file(tokenizer_path)
+    vocab_size = tokenizer.get_vocab_size()
+    model_cfg = load_model_cfg(out_dir, model_type)
+    fp = os.path.join(out_dir, "models", model_type + "_model")
+    print(out_dir);
+    print(fp)
+    enc_fp = os.path.join(out_dir, "embedding_models", model_type, "model")
+    model = Seq2SeqTransformer(
+        vocab_size=vocab_size,
+        d_model=model_cfg["d_model"],
+        nhead=model_cfg["nhead"],
+        num_encoder_layers=model_cfg["num_encoder_layers"],
+        num_decoder_layers=model_cfg["num_decoder_layers"],
+        dim_feedforward=model_cfg["dim_feedforward"],
+        dropout=model_cfg["dropout"],
+    )
+    state_dict = torch.load(fp+".pt")
+    model.load_state_dict(state_dict)
 
-def save_model(out_dir, model, model_type, model_cfg):
+    encoder_model = EncoderOnly(
+        vocab_size=model_cfg["vocab_size"],
+        d_model=model_cfg["d_model"],
+        nhead=model_cfg["nhead"],
+        num_layers=model_cfg["num_encoder_layers"],
+        dim_feedforward=model_cfg["dim_feedforward"],
+        dropout=model_cfg["dropout"],
+    )
+    print(f"model.embedding.shape: {model.embedding.weight.shape} / encoder_model.embedding: {encoder_model.embedding.weight.shape}")
+    # copy the weights of full model to encoder model
+    encoder_model.embedding.load_state_dict(model.embedding.state_dict())
+    encoder_model.pos_encoder.load_state_dict(model.pos_encoder.state_dict())
+    encoder_model.encoder.load_state_dict(model.transformer.encoder.state_dict())
+    torch.save(encoder_model.state_dict(), enc_fp + ".pt")
+    with open(enc_fp + ".cfg", "w") as f:
+        json.dump(model_cfg, f, indent=4)
+    tokenizer.save(tokenizer_embedding_path)
+
+
+
+def save_model(out_dir, model, model_type, model_cfg, tokenizer):
     fp = os.path.join(out_dir, "models", model_type + "_model")
     enc_fp = os.path.join(out_dir, "embedding_models", model_type, "model")
+    tokenizer_path = os.path.join(out_dir, "embedding_models", model_type, "tokenizer.json")
     torch.save(model.state_dict(), fp + ".pt")
     with open(fp + ".cfg", "w") as f:
         json.dump(model_cfg, f, indent=4)
@@ -40,13 +82,18 @@ def save_model(out_dir, model, model_type, model_cfg):
         dim_feedforward=model_cfg["dim_feedforward"],
         dropout=model_cfg["dropout"],
     )
+    # copy the weights of full model to encoder model
+    encoder_model.embedding.load_state_dict(model.embedding.state_dict())
+    encoder_model.pos_encoder.load_state_dict(model.pos_encoder.state_dict())
+    encoder_model.encoder.load_state_dict(model.transformer.encoder.state_dict())
     torch.save(encoder_model.state_dict(), enc_fp + ".pt")
     with open(enc_fp + ".cfg", "w") as f:
         json.dump(model_cfg, f, indent=4)
+    tokenizer.save(tokenizer_path)
 
 
-def load_model_cfg(model_type):
-    fp = os.path.join("models", model_type + "_model.cfg")
+def load_model_cfg(out_dir, model_type):
+    fp = os.path.join(out_dir, "models", model_type + "_model.cfg")
     model_cfg = None
     with open(fp, "r") as f:
         model_cfg = json.load(f)
@@ -195,7 +242,6 @@ def main():
     args = parser.parse_args()
 
     model_cfg = {
-        "vocab_size": args.vocab_size,
         "d_model": args.model_embedding_size,
         "nhead": args.model_nhead,
         "num_encoder_layers": args.model_encoder_layer_count,
@@ -288,14 +334,14 @@ def main():
     )
 
     if args.reload_latest_model:
-        model_cfg = load_model_cfg("latest")
+        model_cfg = load_model_cfg(out_dir, "latest")
     if args.reload_best_model:
-        model_cfg = load_model_cfg("best")
+        model_cfg = load_model_cfg(out_dir, "best")
 
     vocab_size = tokenizer.get_vocab_size()
     model = Seq2SeqTransformer(
-        vocab_size=model_cfg["vocab_size"],
-        d_model=model_cfg["vocab_size"],
+        vocab_size=vocab_size, 
+        d_model=model_cfg["d_model"],
         nhead=model_cfg["nhead"],
         num_encoder_layers=model_cfg["num_encoder_layers"],
         num_decoder_layers=model_cfg["num_decoder_layers"],
@@ -452,12 +498,12 @@ def main():
         eval_loss_history.append(avg_eval_loss)
     
         model_cfg["eval_loss"] = avg_eval_loss
-        save_model(out_dir, model, "latest", model_cfg)
+        save_model(out_dir, model, "latest", model_cfg, tokenizer)
         if avg_eval_loss < min_eval_loss:
             stopping_patience = 0
             #torch.save(model.state_dict(), best_model_fp)
             min_eval_loss = avg_eval_loss
-            save_model(out_dir, model, "best", model_cfg)
+            save_model(out_dir, model, "best", model_cfg, tokenizer)
             print("best validation loss, save model to: " + best_model_fp)
         elif not args.disable_early_stopping:
             stopping_patience += 1
@@ -519,4 +565,5 @@ def main():
     print(f"Test Loss: {avg_test_loss:.4f}")
 
 if __name__ == "__main__":
-    main()
+    #main()
+    save_model_to_embedding("en", "best")
