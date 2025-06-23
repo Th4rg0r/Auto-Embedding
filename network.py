@@ -29,6 +29,28 @@ class PositionalEncoding(nn.Module):
         x + self.pe[:, : x.size(1)]
         return x
 
+class EncoderOnly(nn.Module):
+    def __init__(
+        self,
+        vocab_size,
+        d_model=512,
+        nhead=8,
+        num_layers=3, 
+        dim_feedforward=2048, 
+        dropout = 0.1,
+    ):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.pos_encoder = PositionalEncoding(d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, batch_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+
+    def forward(self, src_ids, src_key_padding_mask=None):
+        x = self.embedding(src_ids) * math.sqrt(self.embedding.embedding_dim)
+        x = self.pos_encoder(x)
+        memory = self.encoder(x, src_key_padding_mask=src_key_padding_mask)
+    return memory
+
 
 class Seq2SeqTransformer(nn.Module):
     def __init__(
