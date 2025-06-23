@@ -40,6 +40,18 @@ def main():
         help="embedding size, both the input enbedding size and also the generated result embedding size (in this case has to be a multiple of '8'. Default: 512",
     )
     parser.add_argument(
+        "--model_encoder_layer_count",
+        type=int,
+        default=6,
+        help="the encoder layer count the internal transformer. More layers make the model bigger and more komplex, but also increase computation time on inference",
+    )
+    parser.add_argument(
+        "--model_decoder_layer_count",
+        type=int,
+        default=6,
+        help="the decoding layer code of the internal transformer. makes the model bigger and able to handle more komplex tasks. increases training time, but does not effect inference on the embedding model",
+    )
+    parser.add_argument(
         "--vocab_size",
         type=int,
         default=5000,
@@ -98,12 +110,12 @@ def main():
     )
     parser.add_argument(
         "--disable_reduce_lr_on_plateau",
-        action=store_true,
+        action="store_true",
         help="disableces reduce_lr_on_plateau. In this case, The model will be trained on a fixed learning rate for fixed epochs",
     )
     parser.add_argument(
         "--disable_early_stopping",
-        action=store_true,
+        action="store_true",
         help="disables the early stopping mechanism. In this case the model will be trained further, even if validation loss is persistentley not decreasing.",
     )
     parser.add_argument(
@@ -219,9 +231,9 @@ def main():
         vocab_size=vocab_size,
         d_model=args.model_embedding_size,
         nhead=8,
-        num_encoder_layers=3,
-        num_decoder_layers=3,
-        dim_feedforward=512,
+        num_encoder_layers=args.model_encoder_layer_count,
+        num_decoder_layers=args.model_decoder_layer_count,
+        dim_feedforward=2048,
     )
     model = model.to(device)
     if args.reload_latest_model:
